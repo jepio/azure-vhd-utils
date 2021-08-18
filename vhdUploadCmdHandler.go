@@ -111,11 +111,13 @@ func vhdUploadCmdHandler() cli.Command {
 				return err
 			}
 			blobServiceClient := storageClient.GetBlobService()
-			if _, err = blobServiceClient.CreateContainerIfNotExists(containerName, storage.ContainerAccessTypePrivate); err != nil {
+			container := blobServiceClient.GetContainerReference(containerName)
+			if _, err = container.CreateIfNotExists(&storage.CreateContainerOptions{Access: storage.ContainerAccessTypePrivate}); err != nil {
 				return err
 			}
 
-			blobExists, err := blobServiceClient.BlobExists(containerName, blobName)
+			blob := container.GetBlobReference(blobName)
+			blobExists, err := blob.Exists()
 			if err != nil {
 				return err
 			}
@@ -236,11 +238,14 @@ func getLocalVHDMetaData(localVHDPath string) *metadata.MetaData {
 // the new page blob in bytes and parameter vhdMetaData is the custom metadata to be associacted with the page blob
 //
 func createBlob(client storage.BlobStorageClient, containerName, blobName string, size int64, vhdMetaData *metadata.MetaData) {
-	if err := client.PutPageBlob(containerName, blobName, size, nil); err != nil {
+	blob := client.GetContainerReference(containerName).GetBlobReference(blobName)
+	blob.Properties.ContentLength = size
+	if err := blob.PutPageBlob(nil); err != nil {
 		log.Fatal(err)
 	}
 	m, _ := vhdMetaData.ToMap()
-	if err := client.SetBlobMetadata(containerName, blobName, m, make(map[string]string)); err != nil {
+	blob.Metadata = m
+	if err := blob.SetMetadata(nil); err != nil {
 		log.Fatal(err)
 	}
 }
@@ -249,10 +254,12 @@ func createBlob(client storage.BlobStorageClient, containerName, blobName string
 //
 func setBlobMD5Hash(client storage.BlobStorageClient, containerName, blobName string, vhdMetaData *metadata.MetaData) {
 	if vhdMetaData.FileMetaData.MD5Hash != nil {
-		blobHeaders := storage.BlobHeaders{
+		blobProperties := storage.BlobProperties{
 			ContentMD5: base64.StdEncoding.EncodeToString(vhdMetaData.FileMetaData.MD5Hash),
 		}
-		if err := client.SetBlobProperties(containerName, blobName, blobHeaders); err != nil {
+		blob := client.GetContainerReference(containerName).GetBlobReference(blobName)
+		blob.Properties = blobProperties
+		if err := blob.SetProperties(nil); err != nil {
 			log.Fatal(err)
 		}
 	}
@@ -263,7 +270,8 @@ func setBlobMD5Hash(client storage.BlobStorageClient, containerName, blobName st
 // in which the page blob resides, parameter blobName is name for the page blob
 //
 func getAlreadyUploadedBlobRanges(client storage.BlobStorageClient, containerName, blobName string) []*common.IndexRange {
-	existingRanges, err := client.GetPageRanges(containerName, blobName)
+	blob := client.GetContainerReference(containerName).GetBlobReference(blobName)
+	existingRanges, err := blob.GetPageRanges(nil)
 	if err != nil {
 		log.Fatal(err)
 	}
@@ -279,9 +287,11 @@ func getAlreadyUploadedBlobRanges(client storage.BlobStorageClient, containerNam
 // in which the page blob resides, parameter blobName is name for the page blob
 //
 func getBlobMD5Hash(client storage.BlobStorageClient, containerName, blobName string) string {
-	properties, err := client.GetBlobProperties(containerName, blobName)
+	blob := client.GetContainerReference(containerName).GetBlobReference(blobName)
+	err := blob.GetProperties(nil)
 	if err != nil {
 		log.Fatal(err)
 	}
-	return properties.ContentMD5
+
+	return blob.Properties.ContentMD5
 }
